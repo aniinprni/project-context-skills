@@ -75,6 +75,11 @@ Restart Claude Code (or start a new session) and the commands appear as
 Answers a narrower question: *what is this code graph missing, and does that
 invalidate the answers I get from it?*
 
+- Runs as a **dependency graph, not a sequence**: the AST census and the graph
+  inventory are independent and dispatch together, as do the three audit steps that
+  follow the diff. Wide steps fan out to subagents — one per construct family, per
+  indirect-construct class, per hypothesis — while classification and severity
+  ranking stay single-reasoner so findings remain comparable.
 - Pins the comparison to the commit the graph was indexed at, and reports drift.
 - Narrows to **3–4 representative packages** chosen to exercise different parsing
   problems (DI/decorators, ORM, API schema, UI), because depth of evidence beats

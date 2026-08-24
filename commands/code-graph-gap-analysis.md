@@ -12,6 +12,56 @@ PARSER FAILS TO REPRESENT, so the parser can be improved.
 
 Optional arguments from the user: $ARGUMENTS
 
+## Execution plan — read this before starting
+
+These steps are a dependency graph, NOT a strict sequence. Steps at the same level
+have no dependency on each other and MUST be dispatched together in one batch, not
+run one after the other. Steps marked PARALLEL fan out to subagents internally.
+
+```
+Step -1 -> Step 0 -> Step 1              strictly sequential (inputs, commit, scope)
+     |
+     +-- Step 2  AST ground truth        PARALLEL: one agent per selected unit
+     +-- Step 3  Graph inventory         PARALLEL: one agent per label/edge-type group
+     |           (2 and 3 are independent - dispatch them together)
+     v
+   BARRIER (Step 4 needs both censuses complete)
+     |
+   Step 4  Diff and classify             single agent, whole-corpus reasoning
+     |
+     +-- Step 5  Construct matrix        PARALLEL: one agent per construct family
+     +-- Step 6  Resolution audit        PARALLEL: one agent per indirect-construct class
+     +-- Step 7  Hypothesis tests        PARALLEL: one agent per hypothesis
+     |           (5, 6 and 7 all read the Step 4 output - dispatch them together)
+     v
+   BARRIER (Steps 8 and 9 rank across ALL findings)
+     |
+   Step 8 -> Step 9 -> Output            sequential synthesis, single agent
+```
+
+Steps 4, 8 and 9 are deliberately NOT parallel: they require reasoning over the
+complete finding set, and splitting them produces inconsistent classification and
+incomparable severity rankings.
+
+### Subagent contract
+Every fan-out subagent gets: the pinned commit, its assigned slice, the path to the
+**shared** census JSON from Step 2, and the graph coordinates from Step -1.
+
+- Each returns structured findings, one evidence triple per finding: source snippet
+  with `file:line`, the exact graph query run, the observed result.
+- **Reject any finding that arrives without a complete triple.** Do not launder an
+  unsupported claim into the report by rewording it — send it back or drop it and
+  note the drop.
+- Subagents report counts **read from the shared census**; they must never re-derive
+  counts independently, or the report's numbers will not reconcile.
+- Independently re-verify a sample of at least two findings per subagent, plus
+  **every** finding that drives an `unusable` trustworthiness verdict. A verdict that
+  severe is worth confirming yourself before publishing it.
+- Cap concurrent graph-querying agents at 4-6. The graph API is a shared service and
+  an unthrottled fan-out will rate-limit, producing empty results that look exactly
+  like genuine coverage gaps. **A failed or empty query is never evidence of a gap** -
+  retry it, and if it still fails, mark the row UNVERIFIED.
+
 ## Step -1 — Resolve inputs before doing anything else
 Resolve, in this order of precedence: explicit `$ARGUMENTS` → repo config file
 (e.g. `.breeze.json`, `.cog/`, or equivalent graph-tool config at the repo root)
@@ -81,12 +131,30 @@ emitting a JSON census over the selected units:
 
 Report the extractor's own blind spots before using its numbers.
 
+**Parallelism.** Write ONE extractor and share it — do not let each agent author its
+own, or the per-unit numbers will not be comparable. Then fan out **one agent per
+selected unit** to run it over that unit, reconcile its output against a hand-checked
+sample of files, and report unit-specific blind spots (unresolved tsconfig paths,
+excluded globs, generated directories). Merge the per-unit JSON into a single census
+keyed by unit before Step 4 — every later step reads this one file.
+
+Dispatch this step in the SAME batch as Step 3; they do not depend on each other.
+
 ## Step 3 — Inventory the graph
 Enumerate every node label and edge type in the graph with counts, scoped to the
 selected units. For each, identify the source construct it is supposed to
 represent, and split the delta into **UNDERCOUNT** (source constructs with no
 node) and **OVERCOUNT** (nodes with no supporting source construct). Report both
 columns separately — never a net figure.
+
+**Parallelism.** Enumerate the label and edge-type list first (cheap, single call),
+then fan out **one agent per related group** — e.g. file/module nodes, symbol
+declaration nodes, relationship edges, framework-specific labels — each pulling its
+own counts and a sample of node payloads. Grouping by relatedness rather than by
+arbitrary chunk keeps each agent's reasoning coherent when it decides which source
+construct a label is meant to represent.
+
+Dispatch this step in the SAME batch as Step 2.
 
 ## Step 4 — Diff and classify
 Produce four gap classes, never merged:
@@ -137,6 +205,18 @@ var reads.
 
 Also state explicitly: **are test files indexed, and do test→subject edges exist?**
 
+**Parallelism.** This is the largest step by data volume — roughly 60+ constructs
+across 3–4 units, each needing its own evidence triple. Fan out **one agent per
+construct family** (Declarations / Imports-exports / Calls-and-references / Type
+relationships / Control-and-data-flow / Framework idioms), each covering all selected
+units so it can spot per-unit divergence — a construct parsed correctly in one service
+and missed in another is itself a finding, and splitting by unit instead of by family
+would hide it. Framework idioms is the heaviest family; split it further by stack
+concern (DI, routing, API schema, ORM, UI, build/manifest) if one agent's slice is too
+large to cover at evidence depth.
+
+Dispatch this step in the SAME batch as Steps 6 and 7.
+
 ## Step 6 — Resolution-capability audit (separate from syntax coverage)
 Syntax coverage and symbol resolution are different parser problems, so analyze
 them separately. For each indirect construct below, determine whether the parser
@@ -154,6 +234,14 @@ For each: does the miss produce a **missing** edge, or an edge to the **wrong**
 node? Wrong-target edges are more damaging than missing ones — flag them
 separately and rank them above missing edges in the backlog.
 
+**Parallelism.** Fan out **one agent per bullet above**. Each must trace concrete
+instances end to end — from the reference site, through the resolution chain, to what
+the graph actually points at — rather than reasoning about the construct in general.
+Chasing a multi-hop barrel chain is slow serial work, which is exactly why these run
+concurrently.
+
+Dispatch this step in the SAME batch as Steps 5 and 7.
+
 ## Step 7 — Test prior hypotheses
 If the user supplied a hypotheses file or named known-suspect findings from an
 earlier audit, confirm or refute EACH with evidence. Treat them as hypotheses,
@@ -167,6 +255,13 @@ and report the result even when clean:
 - schema-derived fields double-counted (hand-written source plus generated types)
 - generated, vendored, or build-output directories indexed as first-class source
 - files present as nodes but with zero contained symbols
+
+**Parallelism.** Fan out **one agent per hypothesis**, each instructed to try to
+REFUTE it rather than confirm it. Independent refutation attempts are what keep a
+stale finding from being copied forward into a new report as though it were still
+true.
+
+Dispatch this step in the SAME batch as Steps 5 and 6.
 
 ## Step 8 — Downstream impact
 For each confirmed gap, name the concrete question it breaks: single-file impact
@@ -220,8 +315,14 @@ Sections in this exact order:
   specific gap driving the rating.
 - Never write scratch extractors, census JSON, or intermediate output into the
   audited repo.
+- Respect the execution plan's batching. Running an independent step serially is not
+  a safe default here — it multiplies wall-clock for no gain in accuracy, and on a
+  step this wide it is the difference between a finished report and a truncated one.
+- Do not fan out Steps 4, 8 or 9. Classification and severity ranking need one
+  reasoner holding the whole finding set.
 
 ## Final step
 Print a short summary: graph and commit audited, units selected vs. excluded,
 total gaps by class (A/B/C/D), the top 3 by downstream impact, how many findings
-are UNVERIFIED, and the report paths written.
+are UNVERIFIED, how many subagent findings were rejected for missing an evidence
+triple, and the report paths written.
