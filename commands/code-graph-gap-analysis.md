@@ -19,7 +19,8 @@ have no dependency on each other and MUST be dispatched together in one batch, n
 run one after the other. Steps marked PARALLEL fan out to subagents internally.
 
 ```
-Step -1 -> Step 0 -> Step 1              strictly sequential (inputs, commit, scope)
+Step -1 -> Step 0 -> Step 0.5 -> Step 1  strictly sequential
+                                         (inputs, commit, language census, scope)
      |
      +-- Step 2  AST ground truth        PARALLEL: one agent per selected unit
      +-- Step 3  Graph inventory         PARALLEL: one agent per label/edge-type group
@@ -82,6 +83,51 @@ Any gap you report must be attributable to the parser, not to commits landed
 after indexing. If the indexed commit is unrecoverable, say so and treat every
 finding as provisional.
 
+## Step 0.5 — Language census and coverage declaration
+
+Do this BEFORE scoping, because scoping is where languages get silently lost.
+
+Count every language present in the repo by tracked file count — not just the one
+you expect to audit. Use the version-control file list rather than a directory walk,
+so vendored and ignored trees do not inflate the numbers:
+
+```
+git ls-files | sed -n 's/.*\.\([A-Za-z0-9_]\+\)$/\1/p' | sort | uniq -c | sort -rn
+```
+
+For each language above a trivial threshold, establish two facts with one query each:
+1. Does the graph contain ANY node sourced from a file of that type?
+2. If yes, is it a first-class representation (symbols, relationships) or only a file
+   stub with no contained structure?
+
+Then, for every language, make an explicit disposition — **scoped in** or **declared
+out** — and record it as a table in Methodology AND as rows in the Coverage Baseline:
+
+| Language | Files | Indexed? | Representation | Disposition |
+|---|---:|---|---|---|
+
+**A language may never be omitted silently.** Declaring a language out of scope is
+acceptable and often correct; omitting it without saying so is not, because the
+resulting report looks complete while a whole layer of the system is missing from it.
+
+An **unindexed language is itself a finding, and frequently a larger one than any
+missing construct within an indexed language** — a repo whose infrastructure-as-code,
+schema, or pipeline definitions are absent from the graph cannot answer blast-radius
+questions that cross into those layers, no matter how well its application code is
+parsed. Report such a language as a single high-severity gap with its file count and
+the questions it makes unanswerable. Do NOT spend the full evidence machinery of Steps
+5 and 6 on it: once "not indexed at all" is established, per-construct auditing adds
+nothing. Escalate to a detailed audit only if the language IS indexed and you need to
+know how well.
+
+Watch specifically for languages that live in their own top-level tree rather than
+inside the application packages — infrastructure (Terraform/HCL, Bicep, CloudFormation),
+pipeline and deployment definitions (CI YAML, Kubernetes manifests, Helm), and
+architecture or diagram DSLs. These are the ones the Step 1 selection axes below will
+never reach, because those axes are shaped around application code. Languages that live
+*inside* the application packages — SQL migrations, schema definition files, generated
+clients — travel along with whichever unit you select and need no special handling.
+
 ## Step 1 — Scope: 3 to 4 representative units, not the whole repo
 Depth of evidence matters more than breadth. Detect the stack first, then select
 3–4 packages/services/apps that between them exercise the distinct parsing
@@ -99,6 +145,13 @@ Adapt these axes to whatever stack you actually find. One unit may satisfy two
 axes — say so and pick a fourth to cover what is left. Confirm each selected path
 exists before committing to it; never assume package names.
 
+The axes above are shaped around application code, so they select application
+packages. Reconcile the selection against the Step 0.5 census before continuing: any
+language whose files sit outside every selected unit is carried by its Step 0.5
+disposition, not by this step, and must already be marked scoped-in or declared-out
+there. If a scoped-in language has no unit covering it, add a fifth unit for it or
+change its disposition — do not let it fall between the two steps.
+
 Record in Methodology: the selection, the rationale, the packages deliberately
 excluded, and which constructs are consequently unexamined. **Every count in the
 report must be scoped to these units — never present a sampled figure as a
@@ -114,9 +167,28 @@ requirement, not a preference: Step 6 audits whether the parser RESOLVES symbols
 and a syntax-only parser cannot produce ground truth for resolution — it can
 confirm a construct exists but not what it points at. Use tree-sitter only as a
 fallback for files the tsconfig does not cover (loose scripts, config files), and
-label any counts sourced that way as syntax-only. For other languages use the
+label any counts sourced that way as syntax-only. For other general-purpose languages use the
 equivalent resolution-capable frontend (e.g. `jedi`/`libcst` + mypy for Python,
 `go/packages` for Go, JDT for Java) and state which you used.
+
+**Declarative and configuration languages have no equivalent, and you should not
+pretend otherwise.** For anything scoped in from Step 0.5 that is not a
+general-purpose language, use the native tool that resolves its own references and say
+plainly that the resulting ground truth is coarser than the TS/JS census:
+- Terraform / HCL — `terraform graph`, or `hcl2json` plus module/resource reference
+  extraction. Ground truth is module, resource, variable and output wiring, NOT
+  statements. Report coverage at that granularity and do not fabricate
+  statement-level rows for it.
+- SQL — parse DDL for tables, columns, constraints and indexes; treat migration
+  ordering as a relationship. Note that dynamic or application-constructed SQL is
+  out of reach of static parsing at all, and say so rather than counting it as covered.
+- CI / Kubernetes / Helm YAML — resolve job, step and manifest references structurally.
+- Schema and diagram DSLs (GraphQL SDL, Prisma, likec4) — use their own parsers where
+  one exists; otherwise treat them as unindexed and report them as such.
+
+When a language's ground truth is coarser, mark its Coverage Baseline rows with the
+granularity used, so a reader never compares an HCL resource count against a TS
+statement count as though they measured the same thing.
 
 Write a throwaway extractor to a scratch directory (never into the audited repo)
 emitting a JSON census over the selected units:
@@ -322,7 +394,8 @@ Sections in this exact order:
   reasoner holding the whole finding set.
 
 ## Final step
-Print a short summary: graph and commit audited, units selected vs. excluded,
+Print a short summary: graph and commit audited, languages scoped in vs. declared
+out (with file counts), units selected vs. excluded,
 total gaps by class (A/B/C/D), the top 3 by downstream impact, how many findings
 are UNVERIFIED, how many subagent findings were rejected for missing an evidence
 triple, and the report paths written.

@@ -81,6 +81,12 @@ invalidate the answers I get from it?*
   indirect-construct class, per hypothesis — while classification and severity
   ranking stay single-reasoner so findings remain comparable.
 - Pins the comparison to the commit the graph was indexed at, and reports drift.
+- Takes a **language census before scoping**, and forces an explicit scoped-in /
+  declared-out disposition for every language in the repo. Polyglot repos usually
+  keep infrastructure, pipeline and diagram definitions in their own top-level trees,
+  where application-shaped scope axes never reach them — so a language absent from the
+  graph is reported as a headline finding with its file count, not lost in the
+  sampling.
 - Narrows to **3–4 representative packages** chosen to exercise different parsing
   problems (DI/decorators, ORM, API schema, UI), because depth of evidence beats
   breadth of sampling.
