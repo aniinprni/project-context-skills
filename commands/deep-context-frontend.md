@@ -19,7 +19,7 @@ Optional focus/scope from the user: $ARGUMENTS
 ### Incremental update (diff-aware)
 1. Read the baseline commit from `context/00-index.qmd` ("Generated from commit `<sha>`"). If absent, ask or fall back to FULL.
 2. Changed set: `git diff --name-only <baseline>..HEAD` + `git status --porcelain`. If not git / unresolvable, ask which areas changed.
-3. Empty changed set → report "already up to date at `<HEAD>`", stop — UNLESS the existing set is missing files this command now requires (`14-symbol-reference.qmd`, `15-diagnosis-playbook.qmd`) or predates the depth requirements. That is a SCHEMA UPGRADE: (re)generate the missing/shallow files against current HEAD even without source changes.
+3. Empty changed set → report "already up to date at `<HEAD>`", stop — UNLESS the existing set is missing files this command now requires (`14-symbol-reference.qmd`, `15-diagnosis-playbook.qmd`) or predates the depth requirements. That is a SCHEMA UPGRADE: (re)generate the missing/shallow files against current HEAD even without source changes. **Also a SCHEMA UPGRADE: an existing set that violates any "Non-negotiable output invariants" below** (stacked per-cycle sections under any wording, dated/baseline banners, an over-budget `00-index.qmd`, anchor-drift tables, numbered headings, stale anchors) — NORMALIZE it by collapsing every per-cycle section into the single current-state entry for that symbol/subsystem and deleting the history (at most a 10-line entry per past cycle in `context/CHANGELOG.qmd`).
 4. Re-explore ONLY affected areas and rewrite just those `.qmd` files. Change→file map:
    - routing/router config, route files, `App`/shell → `05-routing-and-navigation.qmd` (+ `02`/`04` if bootstrap/structure changed)
    - store/state slices, effects/thunks/sagas, query hooks → `06-state-and-data-flow.qmd`
@@ -31,9 +31,19 @@ Optional focus/scope from the user: $ARGUMENTS
    - env/config injection → `03-configuration-and-env.qmd`
    - `package.json`/scripts → `02-setup-and-run.qmd`
    - test files/config → `12-testing.qmd`
-   - **ANY changed source file → ALSO refresh the affected sections of
-     `14-symbol-reference.qmd` and `15-diagnosis-playbook.qmd`.** These two deep
-     files must never lag the source they describe.
+   - **ANY changed source file → ALSO refresh the affected sections of the symbol
+     reference (file 14 / its shards) and the diagnosis playbook (file 15 / its
+     shards).** These two deep files must never lag the source they describe.
+   - **MERGE IN PLACE, NEVER APPEND.** Rewrite the entry that is already there so
+     it describes HEAD. Do not add a "what changed at this baseline" section, a
+     "changes at `<sha>`" section, a dated banner, or a second entry for a symbol
+     you already documented. One symbol → exactly one entry, always current.
+     Delete entries whose source is gone.
+   - **RE-ANCHOR THE WHOLE FILE.** When a source file changes at all, re-verify the
+     `file:line` anchor of EVERY symbol documented from that file — not just the
+     symbols that changed. Inserting or deleting any line shifts every anchor below
+     it. Skipping this is the single most common way this context set rots, and a
+     3,000-line page component drifts by hundreds of lines in one sprint.
 5. Always: bump `date:` on rewritten files; re-check `13-glossary-and-open-questions.qmd`; update `00-index.qmd` `date:` + "Generated from commit" sha + coverage checklist if files were added/removed.
 6. Report baseline→HEAD, changed files, updated context files, and those left unchanged.
 7. Touch memory only if the file SET changed or a recorded high-level fact is now wrong.
@@ -51,14 +61,93 @@ Optional focus/scope from the user: $ARGUMENTS
   parallel; you synthesize their findings.
 - Prefer dedicated search/read tools over shell cat/grep where possible.
 
+## Non-negotiable output invariants
+These override everything else below. A run that breaks one of these has failed,
+even if every sentence it wrote is accurate.
+
+1. **CURRENT STATE ONLY — the context set is not a changelog.** Every `.qmd`
+   describes the app as it is at HEAD, not the path it took to get there.
+   - NEVER append a per-cycle section, under ANY wording. Not `## New & changed
+     symbols this cycle`, not `## What changed at this baseline`, not `## Changes
+     at <sha>`, not `## … N baselines ago`, not a dated "incremental update to
+     `<sha>`" banner, not a `*(new at <sha>)*` suffix on a heading. Renaming the
+     section does not make it allowed. Edit the existing entry instead.
+   - **STRUCTURAL TEST — no heading may name a commit, a baseline or a cycle.**
+     `grep -rnE '^#+.*([0-9a-f]{7,40}|baseline|cycle)' context/ --include=*.qmd`
+     must come back empty. That is the phrasing-proof form of the rule above.
+   - NEVER narrate deltas inside a durable entry. Write "renders `<DataSourceCard>`
+     per item" — not "🆕 `cdb7436`: now renders X (was Y)". Commit shas, "new at",
+     "previously", "reverted by" appear nowhere in files 01–15.
+   - If a reader greps a component/hook name they must find exactly ONE
+     description of it, and it must be true right now. Two entries for one symbol
+     is a defect, because the stale one is usually found first.
+   - If a history trail is genuinely wanted it lives in exactly ONE file,
+     `context/CHANGELOG.qmd`: newest first, **one entry per run, max 10 lines**,
+     whole file capped at **200 lines** — trim the oldest. No other file carries
+     history.
+2. **"READ FIRST" appears exactly once** in the whole `context/` set — in
+   `00-index.qmd`. If everything is marked read-first, nothing is.
+3. **Size budgets — measured in BYTES as well as lines.** Line counts do not
+   bound read cost: a 350-line file with 230-byte lines is an 80 KB read. A file
+   over budget gets split or tightened, never shipped:
+   - `00-index.qmd` — **≤ 300 lines AND ≤ 25 KB**, with the routing table/TOC
+     inside the first 50 lines. It is read on EVERY question; keep it cheap.
+   - any other single `.qmd` — **≤ 1,500 lines AND ≤ 120 KB**. Shard rather than
+     overflow (see files 14 and 15).
+   - **no single line over ~400 bytes.** A multi-thousand-byte line is an
+     unreadable wall AND it hides from every line-based budget — break it up.
+   - the whole `context/` set should stay well under the byte size of the source
+     it documents (`find src -type f \( -name '*.ts*' -o -name '*.js*' \) -exec cat {} + | wc -c`
+     vs `cat context/*.qmd context/*/*.qmd | wc -c`). If it approaches that, the
+     set is narrating history or repeating itself — compress, do not rationalize.
+4. **Anchors must be true at HEAD** — see the next section.
+5. **Do not number section headings.** Write `## Contexts` / `## Custom hooks`,
+   never `## 12. Contexts`. Numbering corrupts the moment a section is inserted or
+   removed — observed result in a real run: a playbook running §19 → §21 → … →
+   §26 → §28 → §31 with `## 27. Where to start` sitting last, after §31. Order
+   sections logically and let the heading text carry the meaning.
+
+## Anchor hygiene (`file:line` must not rot)
+Cited anchors are where the execution step jumps, and the `CLAUDE.md` this command
+writes tells future sessions to trust them WITHOUT opening source. A confidently
+wrong anchor is worse than no anchor — and in a frontend repo, where a single page
+component can be 3,000+ lines and gets edited every sprint, anchors rot fastest.
+
+- Anchor format is `path/to/file.tsx:LINE` pointing at the symbol's **declaration**
+  line, and the symbol's own name must appear in the same row so it stays
+  greppable after drift.
+- **Never carry an anchor forward unverified.** Before writing any `file:line`,
+  confirm it against a fresh read of that file at HEAD. An anchor copied from the
+  previous version of a context file is presumed stale.
+- **Re-verify the described FACT, not only the line.** A moved symbol is a drifted
+  anchor; a symbol that left the file is a wrong entry. If an entry says a provider
+  chain lives in `layout/chat-layout.tsx` and that provider is no longer imported
+  there, fix the claim, not just the number.
+- When a file changes, re-anchor every symbol in it (see the incremental rules).
+- List symbols in source order within a module, so an out-of-order or duplicated
+  anchor is visible on sight.
+- **NEVER publish an anchor-drift table.** Do not write a section recording how
+  far anchors moved, or telling the reader to apply a `+717` / `−12` delta to an
+  older section's line numbers, or declaring an earlier section's anchors "void".
+  That is knowingly shipping wrong anchors with homework attached — and after two
+  updates the reader must apply the arithmetic twice, in order. If you worked out
+  the drift, you already know the correct line: **write it into the entry and
+  delete the old one.** The drift table is the bug, not the fix.
+- The verification gate below checks this mechanically. Run it.
+
 ## Output: write these files under `context/` (Quarto `.qmd`, HTML-renderable)
 Each file starts with YAML frontmatter (`title`, `date`) and a one-line "Scope"
 note, and is self-contained.
 
-1. `context/00-index.qmd` — Master index: one-paragraph app description, TOC
-   linking every other file with a one-line hook, "read me first",
-   "how to regenerate", glossary, and a COVERAGE CHECKLIST mapping every
-   top-level source directory to the file(s) documenting it.
+1. `context/00-index.qmd` — Master index, **≤ 300 lines and ≤ 25 KB**:
+   one-paragraph app description, TOC linking every other file with a one-line
+   hook (inside the first 50 lines), "read me first", a SHORT "how to regenerate"
+   note (baseline commit line + the command — not a log), glossary, and a COVERAGE
+   CHECKLIST mapping every top-level source directory to the file(s) documenting
+   it. It also records headline counts (routes/components/hooks/…), which the
+   verification gate re-derives from source every run. This file is read on every
+   single question: no changelog, no "what changed" blocks, no per-baseline
+   history.
 2. `context/01-overview.qmd` — What the app does, primary user personas/roles,
    framework + exact versions (React/Vue/Angular/Next/etc.), language, package
    manager, and a mermaid diagram of the high-level app architecture
@@ -105,13 +194,23 @@ note, and is self-contained.
     emitted, a one-to-three-line description of WHAT IT DOES and HOW (key
     conditional rendering, effects, state it reads/writes, side effects), and
     collaborators. Include a **render/data-flow** note per route/page
-    (route → page → components → hooks → api). Terse rows over prose; large is fine.
+    (route → page → components → hooks → api). Terse rows over prose; large is
+    fine — but **if it would exceed 1,500 lines or 120 KB, shard it**: move the
+    per-module sections into `context/14-symbols/<module>.qmd` (e.g. `routes.qmd`,
+    `components-layout.qmd`, `components-elements.qmd`, `hooks.qmd`, `context.qmd`,
+    `lib.qmd`) and keep `14-symbol-reference.qmd` as a **≤ 150-line router**: one
+    line per shard saying which modules/symbols live in it, so a session loads one
+    shard instead of the whole reference. Shard by module, NEVER by date.
 16. `context/15-diagnosis-playbook.qmd` — The **diagnosis-completeness layer**.
     Per subsystem: likely failure modes (render errors, stale state, failed
     requests, hydration/SSR issues), the broken assumption, the origin
     (`file:line`), blast radius, and the fix approach — from context alone. Add a
     "symptom → suspect location(s)" table and note foot-guns / effect-ordering /
-    race conditions.
+    race conditions. There is **ONE** symptom table for the whole app, kept
+    current — never one per baseline. If the file would exceed 1,500 lines or
+    120 KB, shard it the same way as file 14 into
+    `context/15-diagnosis/<subsystem>.qmd`, with `15-diagnosis-playbook.qmd`
+    reduced to a ≤ 150-line router plus the single global symptom table.
 
 ## Depth requirements (answer-complete & diagnosis-complete)
 The goal: a future session can ANSWER any question and DIAGNOSE any issue from
@@ -122,11 +221,54 @@ error & edge-case handling (loading/empty/error states, retries, guards), and
 precise `file:line` anchors on every claim. Completeness over brevity — better a
 long context file than needing to read source to answer or troubleshoot.
 
-## Coverage requirement
-Before finishing, verify you accounted for EVERY top-level source directory and
-EVERY route, top-level feature, store, and shared component group — and that
-`14-symbol-reference.qmd` lists every significant component/hook/store/util. The
-coverage checklist in `00-index.qmd` must show nothing silently omitted.
+## Verification gate — RUN these checks, do not assert them
+Before finishing (full OR incremental), actually execute the checks below and print
+each result in the final summary. Do not claim completeness — demonstrate it. A
+check you skipped is a check that failed.
+
+1. **Anchor check.** For every `file:line` you cite in a file you wrote this run,
+   read that line and confirm the symbol named alongside it is declared there
+   (±3 lines tolerance for a decorator/JSX wrapper). Fix every miss. Report
+   `anchors checked: N, corrected: M`.
+   ```bash
+   grep -ohE '[A-Za-z0-9_./-]+\.(tsx?|jsx?):[0-9]+' context/*.qmd context/*/*.qmd \
+     | sort -u > /tmp/anchors.txt
+   # for each path:line — sed -n "${line}p" "$path" — and compare to the entry
+   ```
+2. **Count check.** Re-derive every count stated in `00-index.qmd` from source:
+   ```bash
+   grep -rhoE '<Route\b|path: *["\x27]' src/routes src/ 2>/dev/null | wc -l  # routes
+   find src/components -name '*.tsx' | wc -l                                  # components
+   find src/hooks src/service-hooks -name '*.ts*' 2>/dev/null | wc -l         # hooks
+   ```
+3. **Symbol coverage diff.** Per module, diff source exports against documented
+   symbols — do not eyeball this:
+   ```bash
+   grep -rhoE '^export (default )?(function|const) [A-Za-z0-9_]+' src/components/layout \
+     | sed -E 's/.* //' | sort -u > /tmp/src.txt
+   grep -ohE '`[A-Za-z0-9_]+`' context/14-symbols/layout.qmd \
+     | tr -d '`' | sort -u > /tmp/doc.txt
+   comm -13 /tmp/doc.txt /tmp/src.txt   # in source, undocumented  → MUST be empty
+   comm -23 /tmp/doc.txt /tmp/src.txt   # documented, gone from source → delete these
+   ```
+   Repeat per module (components, hooks, context, lib, routes, service-hooks).
+4. **Invariant check.** Confirm nothing violates the invariants:
+   ```bash
+   wc -l context/*.qmd context/*/*.qmd 2>/dev/null        # vs the budgets above
+   grep -rc 'READ FIRST' context/ | grep -v ':0$'         # exactly ONE hit (00-index)
+   # no heading names a commit / baseline / cycle — phrasing-proof, MUST be empty:
+   grep -rnE '^#+.*([0-9a-f]{7,40}|baseline|cycle|🆕)' context/ --include=*.qmd \
+     | grep -v CHANGELOG
+   grep -rnE '^#+ *[0-9]+[.)] ' context/ --include=*.qmd   # numbered headings: MUST be empty
+   awk 'length>400 {print FILENAME": line "FNR" ("length" bytes)"}' \
+     context/*.qmd context/*/*.qmd 2>/dev/null              # mega-lines: MUST be empty
+   wc -c context/00-index.qmd ; du -sk context/             # vs the byte budgets
+   ```
+5. **Coverage checklist.** Every top-level source directory maps to a documenting
+   file in `00-index.qmd`, with nothing silently omitted.
+
+If a check fails and you cannot fix it this run, say so explicitly and flag it
+UNVERIFIED in the summary — never silently.
 
 ## Finalize — one-command setup (ALWAYS do this, full OR incremental run)
 After the `context/` files are written, wire the repo to USE them automatically.
@@ -140,6 +282,11 @@ Do this idempotently (update in place; never duplicate or clobber other content)
    - Route component/hook/behavior questions → `context/14-symbol-reference.qmd`;
      bug/error/"why is X failing"/fix questions → `context/15-diagnosis-playbook.qmd`;
      routes → `05-routing-and-navigation.qmd`; state → `06-...`; api → `07-...`.
+     If 14/15 are sharded, read the router file, then ONLY the one shard that
+     covers the question — never the whole reference.
+   - Anchors (`file:line`) are accurate as of the recorded baseline commit. When
+     executing a change, locate the symbol BY NAME in that file rather than
+     trusting the line number blindly — it may have drifted since.
    - Do NOT open source for Q&A or diagnosis. Read/edit source ONLY when the user
      explicitly asks to implement/execute a change. If context is insufficient or
      marked UNVERIFIED, say so and ask before falling back to source.
@@ -156,5 +303,8 @@ Do this idempotently (update in place; never duplicate or clobber other content)
 
 ## Final step
 Print a short summary: files created/updated, totals (routes/features/components/
-stores/symbols documented), whether `CLAUDE.md` + memory were created or updated,
-and any gaps flagged UNVERIFIED.
+stores/symbols documented, each re-derived from source by the verification gate),
+the result of EVERY verification-gate check (anchors checked/corrected, count
+mismatches fixed, coverage diffs empty or not, invariant/budget check, context
+bytes vs source bytes), whether `CLAUDE.md` + memory were created or updated, and
+any gaps flagged UNVERIFIED.
