@@ -48,6 +48,26 @@ incomparable severity rankings.
 Every fan-out subagent gets: the pinned commit, its assigned slice, the path to the
 **shared** census JSON from Step 2, and the graph coordinates from Step -1.
 
+**Model and effort — set both explicitly on every fan-out dispatch.** A subagent
+does not inherit the session's effort setting, so an unset effort is whatever the
+agent definition defaults to, not what you are running at. Dispatch every fan-out
+subagent with `model: "sonnet"`; the whole-corpus reasoning in Steps 4, 8 and 9 is
+not fanned out and stays on the session model. Effort by step:
+
+| Step | Work | Effort |
+|---|---|---|
+| 2 — AST ground truth (per unit) | Slice is handed over; enumerate against it | `medium` |
+| 3 — Graph inventory (per label/edge-type group) | Slice is handed over; count and list | `medium` |
+| 5 — Construct matrix (per construct family) | Reads Step 4 output and classifies | `high` |
+| 6 — Resolution audit (per indirect-construct class) | Real inference over indirect constructs | `high` |
+| 7 — Hypothesis tests (per hypothesis) | Open-ended; must go find the evidence | `high` |
+
+The rule behind the table: a subagent handed its slice runs at `medium`; a subagent
+that must decide for itself what to read runs at `high`. Never dispatch any of these
+at `low` — low effort consolidates tool calls and cuts exploration, which here
+manufactures false gaps: a construct the agent never looked for reads exactly like a
+construct the parser failed to represent.
+
 - Each returns structured findings, one evidence triple per finding: source snippet
   with `file:line`, the exact graph query run, the observed result.
 - **Reject any finding that arrives without a complete triple.** Do not launder an

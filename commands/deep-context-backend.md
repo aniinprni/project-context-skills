@@ -61,6 +61,18 @@ Optional focus/scope from the user: $ARGUMENTS
   Flag anything you could not verify as "UNVERIFIED".
 - Use subagents (Explore/general-purpose) to fan out across subsystems in
   parallel; each returns findings, you synthesize into the files.
+- **Dispatch every fan-out subagent with `model: "sonnet"`.** The subsystem passes
+  are read-and-extract work; the judgment lives in your synthesis, which stays on
+  the session model. Set effort explicitly on each — the subagent does not inherit
+  the session's effort setting, so an unset effort is whatever the agent definition
+  defaults to, not what you are running at:
+  - **`effort: "high"`** for subsystem exploration (the agent chooses what to read).
+    Do not economize here — shallow exploration is the one failure this command
+    exists to prevent, and it is invisible in the output until someone relies on it.
+  - **`effort: "medium"`** for the symbol-reference anchor re-verification pass
+    (file 14 / its shards) on an incremental update: re-checking `file:line` against
+    a known file list is lookup, not search, and it is the highest-volume work in
+    the run.
 - Prefer dedicated search/read tools over shell cat/grep where possible.
 
 ## Non-negotiable output invariants

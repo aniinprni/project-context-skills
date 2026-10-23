@@ -51,6 +51,18 @@ package. If `all` or empty, cover every package.
   returns a structured summary; you synthesize the root layer and write files.
   For a large monorepo, prefer running this as a workflow (fan out per package,
   then synthesize).
+- **Dispatch every per-package subagent with `model: "sonnet"`.** Per-package
+  exploration is read-and-extract work; the cross-package judgment lives in the
+  root layer you synthesize, which stays on the session model. Set effort
+  explicitly on each — the subagent does not inherit the session's effort setting,
+  so an unset effort is whatever the agent definition defaults to, not what you are
+  running at:
+  - **`effort: "high"`** for per-package exploration (the agent chooses what to
+    read). Do not economize here — shallow exploration is the one failure this
+    command exists to prevent, and in a monorepo it is multiplied by N packages.
+  - **`effort: "medium"`** for the anchor re-verification pass on an incremental
+    update: re-checking workspace-root-relative `file:line` against a known file
+    list is lookup, not search, and it is the highest-volume work in the run.
 - Be precise over verbose. Tables and diagrams over prose.
 
 ## Non-negotiable output invariants
