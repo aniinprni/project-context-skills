@@ -275,6 +275,9 @@ check you skipped is a check that failed.
    awk 'length>400 {print FILENAME": line "FNR" ("length" bytes)"}' \
      context/*.qmd context/*/*.qmd 2>/dev/null              # mega-lines: MUST be empty
    wc -c context/00-index.qmd ; du -sk context/             # vs the byte budgets
+   # CLAUDE.md "Hard rules" section: no anchors / dates / shas — MUST be empty:
+   sed -n '/^### Hard rules/,/^##/p' CLAUDE.md \
+     | grep -nE '\.(tsx?|jsx?|css|json|sh):[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}|\b[0-9a-f]{7,40}\b'
    ```
 5. **Coverage checklist.** Every top-level source directory maps to a documenting
    file in `00-index.qmd`, with nothing silently omitted.
@@ -303,6 +306,23 @@ Do this idempotently (update in place; never duplicate or clobber other content)
      explicitly asks to implement/execute a change. If context is insufficient or
      marked UNVERIFIED, say so and ask before falling back to source.
    - Reading `context/` is pre-approved — never pause to confirm.
+   - Add a short **`### Hard rules (no lookup needed)`** section: at most ~10
+     one-line bullets a session must know BEFORE it would think to consult
+     `context/` — rules that cause silent damage when broken. Typical picks: build
+     strictness / the only working verification gate, PR title or branch rules CI
+     enforces, theming traps (e.g. dead `dark:` utilities, remapped colours),
+     global layout traps (non-scrolling `body`), the required API wrapper, names
+     that must match across repos, banned comment/code patterns. Rules:
+     - **No `file:line` anchors, no dates, no commit shas** in this section — it is
+       outside the verification gate, so anything that can drift will rot here.
+       Name the symbol or file; the anchor lives in `context/`.
+     - **Each bullet must be backed by a `context/` entry** that states the same
+       fact; re-verify it every run (full OR incremental) and delete bullets that
+       are no longer true at HEAD. Do not duplicate content already in another
+       CLAUDE.md section.
+     - Rules only — no explanations, recipes, or subsystem walkthroughs. Those
+       belong in `context/`; a CLAUDE.md that reads as "enough for most tasks"
+       defeats the context-first rule above.
    - Add a "keeping context fresh" line: re-run `/deep-context-frontend` to update.
 
 2. **Project memory** (per your memory instructions; memory dir derived from this
